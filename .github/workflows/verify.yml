@@ -1,0 +1,34 @@
+name: Verify service
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test HTTP contract
+        run: python -m unittest discover -s tests -v
+      - name: Validate Compose and start container
+        run: |
+          docker compose config --quiet
+          docker compose up --build -d --wait --wait-timeout 90
+      - name: Check health endpoint
+        run: |
+          test "$(curl --silent --show-error --output /tmp/health.json --write-out '%{http_code}' http://127.0.0.1:8080/health)" = 200
+          python -c "import json; assert json.load(open('/tmp/health.json')) == {'status': 'ok', 'service': 'catalog-service'}"
+          docker compose ps
+      - name: Show logs and stop
+        if: always()
+        run: |
+          docker compose logs
+          docker compose down

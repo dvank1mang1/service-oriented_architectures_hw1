@@ -1,0 +1,12 @@
+.git
+.gitignore
+.idea
+.vscode
+__pycache__
+*.py[cod]
+tests
+docs
+README.md
+work
+outputs
+**/__pycache__
