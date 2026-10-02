@@ -1,0 +1,71 @@
+---
+title: Marketplace — C4 Container (целевая архитектура)
+config:
+  layout: elk
+  theme: base
+  themeVariables:
+    fontFamily: Arial
+    fontSize: 15px
+  flowchart:
+    htmlLabels: false
+    nodeSpacing: 45
+    rankSpacing: 70
+---
+flowchart TB
+    customer(["Покупатель<br/>[Person]<br/>Лента, корзина, оплата заказа"]):::person
+    seller(["Продавец<br/>[Person]<br/>Товары, цены и остатки"]):::person
+    psp["Платёжный провайдер<br/>[External System]<br/>Hosted checkout, эквайринг, возврат"]:::external
+    delivery["Email/SMS провайдер<br/>[External System]<br/>Доставка статусных сообщений"]:::external
+    subgraph marketplace["Marketplace · Software System"]
+    web["Web App<br/>[Container: TypeScript / React SPA]<br/>Интерфейс покупателя и продавца"]:::service
+    gateway["API Gateway<br/>[Container: Nginx]<br/>TLS, маршрутизация, rate limit"]:::service
+    identity["Identity Service<br/>[Container: Python / HTTP API]<br/>Аккаунты, роли, контакты и сессии"]:::service
+    catalog["Catalog Service<br/>[Container: Python / HTTP API]<br/>Товары, цены, резервы; реализован health"]:::service
+    feed["Feed Service<br/>[Container: Python / HTTP API]<br/>Лента и сигналы просмотров"]:::service
+    order["Order Service<br/>[Container: Python / HTTP API]<br/>Корзина, сумма и статусы заказа"]:::service
+    payment["Payment Service<br/>[Container: Python / HTTP API]<br/>Платежи, проводки, комиссия, возвраты"]:::service
+    notification["Notification Service<br/>[Container: Python / worker]<br/>Шаблоны, повторы, доставка"]:::service
+    bus["Event Broker<br/>[Container: RabbitMQ / AMQP]<br/>Durable queues, подтверждения, DLQ"]:::service
+    identity_db[("Identity DB<br/>[Container: PostgreSQL]<br/>Аккаунты, роли, контакты")]:::db
+    catalog_db[("Catalog DB<br/>[Container: PostgreSQL]<br/>Товары, предложения, резервы")]:::db
+    media[("Media Storage<br/>[Container: S3-compatible]<br/>Медиа; владелец Catalog")]:::db
+    index[("Feed Index<br/>[Container: OpenSearch]<br/>Проекция товаров")]:::db
+    features[("Feed Features / Cache<br/>[Container: Redis]<br/>Интересы, кеш, fallback-лента")]:::db
+    order_db[("Order DB<br/>[Container: PostgreSQL]<br/>Корзины, снимки цен, история")]:::db
+    payment_db[("Payment DB<br/>[Container: PostgreSQL]<br/>Платежи, ledger, возвраты")]:::db
+    notification_db[("Notification DB<br/>[Container: PostgreSQL]<br/>Контакты-проекция, попытки")]:::db
+    end
+    customer -->|"Просматривает и покупает<br/>HTTPS, sync"| web
+    seller -->|"Управляет каталогом<br/>HTTPS, sync"| web
+    web -->|"API-запросы<br/>HTTPS/JSON, sync"| gateway
+    web -->|"Оплата на странице провайдера<br/>HTTPS, sync"| psp
+    gateway -->|"Аккаунты и токены<br/>HTTP/JSON, sync"| identity
+    gateway -->|"Товары и медиа<br/>HTTP/JSON, sync"| catalog
+    gateway -->|"Лента и просмотры<br/>HTTP/JSON, sync"| feed
+    gateway -->|"Корзина и checkout<br/>HTTP/JSON, sync"| order
+    order -->|"Резерв / подтверждение / снятие<br/>HTTP/JSON, sync"| catalog
+    feed -->|"Snapshot для восстановления индекса<br/>HTTP/JSON, sync"| catalog
+    order -->|"Намерение / статус / возврат<br/>HTTP/JSON, sync"| payment
+    payment -->|"Платёж, сверка, возврат<br/>HTTPS/JSON, sync"| psp
+    psp -.->|"Подписанный webhook<br/>HTTPS, async callback"| payment
+    notification -->|"Передаёт сообщение<br/>HTTPS/JSON, sync"| delivery
+    identity -->|"Читает и пишет<br/>SQL"| identity_db
+    catalog -->|"Читает и пишет<br/>SQL"| catalog_db
+    catalog -->|"Читает и пишет<br/>S3 API"| media
+    feed -->|"Индексирует и ищет<br/>HTTPS/JSON"| index
+    feed -->|"Признаки и кеш<br/>RESP"| features
+    order -->|"Читает и пишет<br/>SQL"| order_db
+    payment -->|"Читает и пишет<br/>SQL"| payment_db
+    notification -->|"Читает и пишет<br/>SQL"| notification_db
+    identity -.->|"UserProfileChanged<br/>AMQP, async"| bus
+    catalog -.->|"ProductChanged / StockChanged<br/>AMQP, async"| bus
+    order -.->|"OrderStatusChanged / CartItemAdded<br/>AMQP, async"| bus
+    payment -.->|"PaymentStatusChanged<br/>AMQP, async"| bus
+    bus -.->|"Каталог, корзины, покупки<br/>AMQP, async"| feed
+    bus -.->|"Результаты платежей<br/>AMQP, async"| order
+    bus -.->|"Профили и статусы заказов<br/>AMQP, async"| notification
+    classDef person fill:#163861,color:#fff,stroke:#163861;
+    classDef external fill:#626b78,color:#fff,stroke:#48515f;
+    classDef service fill:#286bb0,color:#fff,stroke:#174675;
+    classDef db fill:#e6f0fb,color:#14395e,stroke:#286bb0;
+    style marketplace fill:#f8fafc,stroke:#64748b,stroke-dasharray:6 4;
