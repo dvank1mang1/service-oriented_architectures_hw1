@@ -1,15 +1,12 @@
-# Marketplace — архитектурный проект
+# marketplace architecture
 
-Учебный проект архитектуры маркетплейса, в котором продавцы размещают товары,
-а покупатели получают персональную ленту и оформляют заказы.
+this project describes a marketplace where sellers list products and buyers browse a personal feed, place orders and pay for them.
 
-В репозитории **нет бизнес-логики**. Реализован только запускаемый каркас
-`Catalog Service` с техническим endpoint `GET /health`. Остальные контейнеры на
-диаграмме описывают целевую архитектуру, а не текущую реализацию.
+only one small service is implemented: `catalog-service`. it has a `/health` endpoint so we can check that it starts and runs in docker. the rest of the marketplace is a design, with no business logic implemented.
 
-## Быстрый запуск
+## run the project
 
-Требования: Docker Desktop с Docker Compose. Регистрация в Docker Hub не нужна.
+you need docker desktop with docker compose, and docker must be running.
 
 ```bash
 git clone https://github.com/dvank1mang1/service-oriented_architectures_hw1.git
@@ -18,272 +15,225 @@ docker compose up --build -d --wait
 curl -i http://localhost:8080/health
 ```
 
-Ожидаемый ответ:
+the endpoint returns status code `200` and this body:
 
-```http
-HTTP/1.0 200 OK
-Content-Type: application/json; charset=utf-8
-
+```json
 {"status":"ok","service":"catalog-service"}
 ```
 
-Проверить состояние контейнера и остановить проект:
+there is no shop page at this address. it is a small technical check that tells us the service is running.
+
+check the container status:
 
 ```bash
 docker compose ps
+```
+
+the status should include `healthy`. to stop the project:
+
+```bash
 docker compose down
 ```
 
-Локальный запуск без Docker требует Python 3.13, сторонние пакеты не нужны:
+you can also run the service without docker. this needs python 3.13, with no extra packages:
 
 ```bash
 python3 -m src.catalog_service
 ```
 
-В другом терминале можно проверить `/health` и запустить тесты:
+leave that terminal open and run the health check in another terminal.
 
-```bash
-python3 -m unittest discover -s tests -v
-```
+## the architecture
 
-## C4 Container diagram
+![c4 container diagram for the marketplace](docs/c4-container.svg)
 
-Диаграмма показывает целевые deployable/runtime-контейнеры, их собственные
-хранилища, внешние системы и протоколы взаимодействия. Полный редактируемый
-исходник: [`docs/c4-container.mmd`](docs/c4-container.mmd).
+the [diagram source](docs/c4-container.mmd) is editable. open the [full-size diagram](docs/c4-container.svg) to read the labels.
 
-![C4 Container — Marketplace](docs/c4-container.svg)
+this is a c4 container diagram. here, a container means an application or a data store, not necessarily a docker container. the diagram shows the planned system; only the catalog service skeleton is running in this project.
 
-Схема использует нотацию C4: люди и внешние системы находятся за границей
-Marketplace; внутри показаны приложения и отдельные хранилища с технологиями.
-`sync` обозначает запрос с ожиданием ответа, `async` — событие или callback.
-Стрелка направлена от инициатора к получателю. Развёрнут только Catalog Service;
-прочие контейнеры — проектные решения.
-Для автоматической разводки стрелок модель C4 отображается через Mermaid
-flowchart с явными метками Person, External System и Container; пунктирные
-стрелки обозначают асинхронные связи. Светлые цилиндры — хранилища.
+people and external providers sit outside the marketplace boundary. blue boxes are applications, light cylinders are data stores, and grey boxes are external systems. each element has a name, type, technology and short description.
 
-### Контейнеры и распределение доменов
+an arrow points from the caller or sender to the receiver. a solid line is a direct call, usually with an immediate reply. a dotted line is an event or a callback that arrives later. the labels show what is sent and which protocol is used.
 
-| Контейнер | Домен и ответственность | Почему отдельная граница |
+mermaid draws the c4 model using its flowchart layout so that the connections and labels stay readable.
+
+## domains, services and data
+
+the marketplace has six business domains: users, catalog, feed, orders, payments and notifications. each has its own service and owns its data.
+
+| service | what it does and owns | why it is separate |
 |---|---|---|
-| API Gateway | TLS, rate limit и маршрутизация | Не содержит доменных правил; скрывает внутреннюю топологию. Каждый API проверяет токен и права самостоятельно |
-| Identity Service | Жизненный цикл покупателей и продавцов, профили, роли и права | Персональные данные и security-нагрузка изолированы от commerce |
-| Catalog Service | Карточки товаров, категории, предложения продавцов, цены, остатки и резервирование | Высокая частота изменений продавцами; единственный источник истины о доступности |
-| Feed Service | Поиск кандидатов, признаки, ранжирование, разнообразие и кеш персональной ленты | Read-heavy нагрузка и eventual consistency отличаются от транзакционного каталога |
-| Order Service | Корзина, снимок позиций/цен, checkout, заказ и его жизненный цикл | Агрегат заказа требует собственной согласованности и истории |
-| Payment Service | Платёжные намерения, результаты провайдера, проводки, возвраты и сверка | Финансовые данные и требования к идемпотентности изолированы от заказа |
-| Notification Service | Шаблоны, проекция контактов и предпочтений канала, попытки и результат доставки | Медленные внешние провайдеры не должны блокировать checkout |
-| Event Broker | Доставка доменных событий между владельцами и подписчиками | Инфраструктура, не система хранения доменной истины |
+| identity | buyer and seller accounts, profiles, roles, contacts and notification preferences | account access and personal details have their own rules |
+| catalog | products, categories, seller offers, prices, stock, reservations and product images | it is the place to check the current price and available stock |
+| feed | product search, ranking, browsing signals, interest scores and cached feed pages | browsing can have much more traffic than checkout and can use slightly older data |
+| order | carts, order items, saved prices, totals, delivery addresses and status history | it owns the order and coordinates the steps needed to place it |
+| payment | payment requests, provider references, accounting entries, fees and refunds | payment records need careful handling of retries and a clear history |
+| notification | message templates, copied contact preferences, delivery attempts and results | a slow email or sms provider should not hold up an order |
 
-Такое разбиение следует bounded context: сервис меняет только свой агрегат и
-не выполняет SQL-запросы в хранилища других сервисов. Команда владеет кодом,
-схемой, API и событиями своего сервиса.
+the other parts support these services:
 
-## Владение данными
+- the web app is the buyer and seller interface;
+- the api gateway handles encrypted connections, request limits and routing;
+- rabbitmq carries events between services;
+- the external payment provider handles the payment page and card details;
+- the external email or sms provider delivers messages.
 
-Разделяемых баз данных нет. Реплика события в Feed Index или Notification DB —
-это производная read-модель, а не второй источник истины.
+### who can read and change data
 
-| Владелец | Собственные данные | Не владеет |
+there are no shared databases between services. each service uses its own credentials and can only access its own stores. another service must use its api or consume its events.
+
+identity, catalog, order, payment and notification each have a separate postgresql database. catalog also owns s3-compatible image storage. feed owns an opensearch index and redis for interest scores and cached pages.
+
+a copy does not change ownership. for example, feed keeps a searchable copy of product data, but catalog still owns the product. an order keeps the price agreed at checkout, while catalog owns the current selling price. notification keeps a copy of contact details, while identity owns the original profile.
+
+the gateway and web app do not own business records. rabbitmq holds messages until they are handled, but it is not the permanent record of orders or payments. failed messages go to a separate queue for inspection and retry.
+
+## how services talk to each other
+
+a synchronous call waits for a reply. we use it when the next step needs an answer now. an asynchronous event tells other services about something that has already happened.
+
+| connection | method | purpose |
 |---|---|---|
-| Identity | `user`, `seller_profile`, роли, контакты и настройки пользователя | Товары, заказы, платежи |
-| Catalog | `product`, `category`, `offer`, цена, остаток, резерв, ссылки на медиа | Профили, корзины, финансовые проводки |
-| Feed | Поисковый индекс, псевдонимные признаки интересов, просмотры и кеш страниц | Мастер-карточки товаров и заказы |
-| Order | Корзина, `order`, позиции, зафиксированный снимок цены, адрес доставки и история статусов | Текущий остаток и платёжные проводки |
-| Payment | Платёжное намерение, транзакция провайдера, проводка, возврат, idempotency key, принятый webhook | Состояние заказа и карточные реквизиты; последние хранит провайдер |
-| Notification | Шаблон, канал, попытка, статус доставки и provider message id | Статус заказа как источник истины |
+| web app to gateway | synchronous https/json | send user requests |
+| gateway to identity, catalog, feed or order | synchronous http/json | forward each request to the right service |
+| order to catalog | synchronous http/json | check prices, reserve stock, confirm or release a reservation |
+| order to payment | synchronous http/json | create a payment request, check its status or request a refund |
+| feed to catalog | synchronous http/json | get a product snapshot when rebuilding the search index |
+| payment to payment provider | synchronous https/json | create payments, check uncertain results and request refunds |
+| payment provider to payment | asynchronous https webhook | report a payment result, with a signature that payment verifies |
+| identity, catalog, order and payment to rabbitmq | asynchronous amqp | publish profile, product, stock, cart, order and payment changes |
+| rabbitmq to feed | asynchronous amqp | update product copies and use cart or purchase activity for ranking |
+| rabbitmq to order | asynchronous amqp | apply the payment result to the order |
+| rabbitmq to notification | asynchronous amqp | update copied contacts and send messages about order status |
+| notification to message provider | synchronous https/json from a background worker | submit a message without making checkout wait |
+| web app to payment provider | https | let the buyer pay on the provider's page |
 
-RabbitMQ хранит неподтверждённые сообщения в durable queues, а сообщения с
-исчерпанными попытками — в DLQ; он не является архивом доменных сущностей.
-Object Storage принадлежит Catalog Service. OpenSearch и Redis принадлежат Feed.
-У каждого сервиса отдельная БД и учётные данные без доступа к чужим БД.
+### retries and failures
 
-## Взаимодействия
+each data-owning service saves a change and its outgoing event in the same local database transaction. the outgoing event is stored in an outbox table. a background worker sends it to rabbitmq and waits for confirmation.
 
-Синхронный вызов используется, только если продолжение пользовательской операции
-зависит от немедленного ответа. Асинхронный — для распространения факта, который
-уже зафиксирован владельцем.
+a message can arrive more than once. receivers remember event ids so they do not apply the same change twice. events also carry a record id and version, which helps receivers ignore older updates.
 
-| Откуда → куда | Способ | Назначение и поведение при сбое |
-|---|---|---|
-| Client → Gateway → Identity/Catalog/Feed/Order | Синхронно, HTTPS/JSON; внутри HTTP/JSON | Ответ на пользовательскую команду; timeout, ограниченный retry безопасных либо идемпотентных запросов |
-| Order → Catalog | Синхронно, HTTP/JSON | Проверка снимка цены, атомарный резерв, подтверждение или снятие; без резерва checkout не продолжается |
-| Order → Payment | Синхронно, HTTP/JSON | Идемпотентное создание намерения, проверка статуса и возврат; окончательный результат может прийти позже |
-| Payment ↔ провайдер | Синхронный HTTPS + подписанный webhook | Авторизация/возврат и окончательный статус; webhook дедуплицируется |
-| Identity/Catalog/Order/Payment → RabbitMQ | Асинхронно, AMQP | Transactional outbox, publisher confirms, доставка at-least-once, schema/version/event_id |
-| Broker → Feed | Асинхронно | Обновление индекса и признаков; допустима временно устаревшая выдача |
-| Broker → Order | Асинхронно | Продолжение state machine после финального результата платежа |
-| Broker → Notification | Асинхронно, AMQP | Контакты из UserProfileChanged и статусы из OrderStatusChanged; backoff и DLQ |
-| Notification → провайдер сообщений | Синхронно, HTTPS/JSON из фонового worker | Передача сообщения вне пути checkout; статус приёма не равен фактической доставке |
-| Web App → платёжный провайдер | Синхронно, HTTPS | Переход по hosted-checkout URL; карточные реквизиты не проходят через маркетплейс |
+commands such as creating a payment use an idempotency key: repeating the same request with the same key returns the existing result instead of creating a second payment.
 
-Распределённой ACID-транзакции нет. Планируемая реализация использует outbox и
-идемпотентных потребителей. При неуспешной оплате Order инициирует освобождение
-резерва; при невозможности завершить оплаченный заказ — компенсационный возврат.
+there is no single transaction covering every service. if one step fails after another has succeeded, the system needs a follow-up action, such as releasing stock or refunding a payment.
 
-## Сценарии
+## what happens when someone places an order
 
-### Оформление заказа
+1. order saves a draft and the request key before calling another service.
+2. catalog checks current prices and reserves all requested items together. the reservation has an expiry time. if a price changed, the buyer needs to confirm it.
+3. order saves the agreed prices and total, then asks payment to create a payment request for that order.
+4. payment gets a checkout link from the provider. the buyer follows it and pays on the provider's page.
+5. payment verifies the provider's callback, saves the result and accounting entries, and publishes an event. returning to the shop page alone does not prove that payment succeeded.
+6. order receives the result, confirms the stock reservation and marks the order as paid. its status event tells notification to send a message.
 
-1. Order сохраняет черновик заказа и idempotency key перед внешними вызовами.
-2. Order получает у Catalog актуальные цены и атомарный резерв всех позиций
-   с `order_id` и TTL. При изменении показанной цены пользователь подтверждает её.
-3. Order сохраняет снимок позиций и итоговую сумму, затем запрашивает у Payment
-   намерение с тем же `order_id`. Повтор команды возвращает прежний результат.
-4. Payment сохраняет намерение, получает hosted-checkout URL у провайдера;
-   Order возвращает URL клиенту. Клиент оплачивает на странице провайдера.
-5. Payment проверяет подпись webhook, дедуплицирует его, сохраняет финансовые
-   проводки и outbox-событие. Возврат браузера сам по себе не доказывает оплату.
-6. Order принимает PaymentStatusChanged, подтверждает резерв у Catalog и
-   переводит заказ в PAID. OrderStatusChanged запускает Notification.
+a timeout does not prove that a payment failed. payment checks the result with the provider, and order retries unfinished steps using the same request keys.
 
-Таймаут не означает отказ: фоновое восстановление в Order продолжает незавершённую
-операцию с прежним ключом; Payment сверяет неизвестный результат с провайдером.
-При неоплате резерв истекает по TTL. При позднем успешном платеже и уже истёкшем
-резерве заказ переходит в REFUND_PENDING, запускается идемпотентный возврат,
-затем REFUNDED. Сбой после подтверждения резерва восстанавливается повтором
-команды: Catalog помнит результат по order_id. События имеют aggregate_id и
-версию: обработчики игнорируют повторы и устаревшие переходы.
+unpaid reservations expire. if a successful payment arrives after the stock reservation has expired, order requests a refund and tracks it until completion. if a service fails just after confirming a reservation, a retry returns the saved result for that order.
 
-### Расчёт и учёт платежей
+### payment calculation and records
 
-Для проекта предполагается одна валюта RUB, без скидок, налогового расчёта и
-платной доставки. Order считает сумму `Σ(price_minor × quantity)` по снимку цен
-из Catalog, используя целые копейки. Payment принимает эту сумму только от Order,
-а не от браузера, проверяет её совпадение с данными провайдера и ведёт журнал
-неизменяемых парных проводок. Комиссию платформы и обязательство перед каждым
-продавцом рассчитывает Payment по сохранённой версии тарифа; возврат создаёт
-обратные проводки. Реальные перечисления продавцам и фискализация за рамками ДЗ.
+the design assumes one currency, rubles, with no discounts, tax calculation or delivery charge.
 
-### Обновление каталога и ленты
+order calculates the total as the sum of each saved item price multiplied by its quantity. amounts use whole kopecks rather than floating-point numbers.
 
-1. Продавец меняет товар через Catalog Service.
-2. Catalog в одной локальной транзакции сохраняет изменение и outbox-запись.
-3. `ProductChanged` попадает в broker, после чего Feed обновляет свой индекс.
-4. До обработки события лента может быть устаревшей. Только атомарная проверка
-   и резерв в Catalog при checkout предотвращают продажу отсутствующего товара;
-   TTL кеша сам по себе такой гарантии не даёт.
+payment accepts the amount from order, checks it against the provider's result and keeps a permanent accounting history. each movement has matching debit and credit entries. payment also calculates the platform fee and the amount owed to each seller using the saved fee rules.
 
-## Персонализация ленты
+a refund adds reversing entries rather than deleting the original ones. card details stay with the provider. actual payouts to sellers and fiscal receipts are outside this assignment.
 
-Выбрана гибридная, умеренная персонализация без обязательного online ML:
+## how the personal feed works
 
-- кандидаты берутся из денормализованного поискового индекса доступных товаров;
-- базовый score учитывает популярность и свежесть;
-- персональная часть учитывает affinity к категориям и ценовым диапазонам по
-  просмотрам, корзинам и покупкам;
-- post-ranking обеспечивает разнообразие и ограничивает повторение одного
-  продавца или категории;
-- для нового/анонимного пользователя используется популярное и свежее с
-  разнообразием категорий;
-- если признаки недоступны, используется популярность из OpenSearch; при сбое
-  OpenSearch — заранее рассчитанная общая лента в Redis. Если недоступны оба
-  хранилища, запрос завершается 503, а checkout остаётся отдельным контуром.
+the feed uses a simple mix of popularity and personal interests:
 
-Просмотры поступают через Gateway в Feed и обновляют его признаки; корзины и
-покупки поступают событиями Order. Профиль контактов из Identity в Feed не нужен.
-После потери индекса Feed восстанавливает его из постраничного snapshot API
-Catalog с сервисными правами, а затем применяет накопленные
-изменения по версии товара. Redis-признаки могут быть сброшены до cold start.
+- start with available products from the search index;
+- prefer popular and recently added products;
+- adjust the ranking using categories and price ranges the buyer has viewed, added to a cart or bought;
+- mix sellers and categories so the page is not filled with similar items;
+- show a varied selection of popular products to new or anonymous users.
 
-Feed хранит псевдонимный `user_id` и производные признаки. Профили, заказы и
-товары остаются у их владельцев. Обновление признаков асинхронно, а страницы
-ленты имеют короткий TTL, поэтому этот контур сознательно eventual consistent.
+feed receives views through the gateway. cart changes and purchases arrive as events from order. feed uses a user id and interest scores; it does not need the person's name or contact details.
 
-## Варианты декомпозиции и trade-off’ы
+when a seller updates a product, catalog saves the change and publishes an event. feed then updates its own copy. this means the feed can briefly show an old price or an item that has sold out. the final stock check and reservation happen in catalog during checkout.
 
-### Вариант A — модульный монолит
+if personal interest data is unavailable, feed uses the popularity ranking in opensearch. if opensearch is unavailable, it serves a prepared general feed from redis. if both stores are unavailable, the feed returns status code `503`; order processing remains a separate service.
 
-Один deployable с внутренними модулями Identity, Catalog, Feed, Order, Payment и
-Notification; одна PostgreSQL-инсталляция с отдельными схемами, фоновые worker'ы.
+a lost search index can be rebuilt from catalog snapshots, then updated with queued events using product versions. lost interest scores can fall back to the same behaviour used for new users.
 
-Плюсы:
+## other ways to split the system
 
-- минимальная операционная сложность и стоимость инфраструктуры;
-- локальные транзакции и простой запуск для маленькой команды;
-- быстрый рефакторинг границ на ранней стадии.
+### option a: a modular monolith
 
-Минусы:
+one application contains all six domains as internal modules. it uses one postgresql installation with separate schemas and background workers.
 
-- весь продукт масштабируется и выкатывается вместе;
-- сбой тяжёлого feed-запроса способен повлиять на checkout;
-- границы схем со временем легко нарушить прямыми JOIN;
-- платежный контур сложнее изолировать организационно и технически.
+advantages:
 
-### Вариант B — доменные микросервисы (выбран)
+- fewer moving parts and lower running costs;
+- simpler transactions and local development;
+- easier to change module boundaries while the product is still small.
 
-Шесть доменных сервисов, собственная БД у каждого, синхронное ядро checkout и
-асинхронные события для read-моделей и побочных эффектов.
+disadvantages:
 
-Плюсы:
+- the whole application is released and scaled together;
+- heavy feed traffic can affect checkout;
+- modules can become tied to each other's database tables;
+- payment code and personal data are harder to isolate.
 
-- независимое масштабирование read-heavy Feed и критичных Order/Payment;
-- явное владение данными и изоляция платёжного контура;
-- уведомления и переиндексация не увеличивают задержку checkout;
-- сервисы можно выпускать и восстанавливать независимо.
+### option b: separate services for each domain
 
-Минусы:
+this is the chosen option. each of the six domains has its own service and data stores. direct calls handle the steps that need an immediate answer; events update the feed and trigger notifications.
 
-- eventual consistency и нет межсервисных ACID-транзакций;
-- нужны broker, трассировка, outbox, идемпотентность и контрактное тестирование;
-- больше стоимость эксплуатации и локальной разработки;
-- изменение сквозного сценария требует координации API/событий.
+advantages:
 
-### Вариант C — крупные сервисы Commerce и Engagement
+- feed capacity can grow without scaling payments and orders by the same amount;
+- data ownership is clear;
+- payment records have their own boundary;
+- notifications and search updates do not delay checkout;
+- services can be released and recovered separately.
 
-`Commerce Core` объединяет Identity, Catalog, Order и Payment в транзакционное
-ядро; `Engagement` объединяет Feed и Notification. Между ними — события.
+disadvantages:
 
-Плюсы:
+- some copies of data take time to catch up;
+- failures can happen between steps in different services;
+- retries, event delivery and tracing need extra work;
+- running and developing the system costs more;
+- changes to shared api or event formats need coordination.
 
-- меньше сетевых переходов и проще согласованность checkout, чем в варианте B;
-- только две основные deployable-границы и умеренная стоимость эксплуатации;
-- тяжёлые чтения ленты всё ещё изолированы от commerce.
+### option c: two larger services
 
-Минусы:
+one commerce service contains users, catalog, orders and payments. a second service contains the feed and notifications. they exchange events and each owns its own storage.
 
-- Commerce становится крупным blast radius и масштабируется целиком;
-- платежи и персональные данные хуже изолированы;
-- разные команды будут конкурировать за релиз одного ядра;
-- дальнейшее разделение потребует миграции данных и контрактов.
+advantages:
 
-### Почему выбран вариант B
+- fewer calls between services during checkout;
+- fewer applications to run than option b;
+- feed traffic is still separated from the main purchase flow.
 
-Требования уже содержат шесть хорошо различимых зон ответственности. Feed имеет
-особый профиль нагрузки и допускает eventual consistency, тогда как Order и
-Payment требуют строгой локальной согласованности, аудита и идемпотентности.
-Notification зависит от нестабильных внешних каналов и не должен быть частью
-критического пути. Поэтому доменные микросервисы лучше всего демонстрируют
-границы данных и позволяют независимо развивать и масштабировать эти нагрузки.
-Предположение: проектируется растущая платформа с возможностью эксплуатации
-нескольких сервисов. Это не утверждение, что любой маркетплейс обязан начинать
-с микросервисов; требований к RPS и размеру команды в условии нет.
+disadvantages:
 
-Цена решения осознана: для реального MVP с маленькой командой разумнее начать с
-варианта A и извлекать сервисы по мере нагрузки. В этой работе вариант B —
-целевая архитектура, а поднимается только один каркас сервиса, как и требует
-условие задания.
+- a problem in the commerce service can affect several domains at once;
+- payments and personal data have less isolation;
+- several teams may need to coordinate releases of the same application;
+- splitting the commerce service later would require moving data and changing interfaces.
 
-## Ограничения и эксплуатация
+### why option b was chosen
 
-Все API проверяют подписанный access token и права на конкретный объект:
-продавец может менять только свои предложения, покупатель — читать свои заказы.
-Публичные ключи Identity распространяются через конфигурацию; приватный ключ
-остаётся у Identity. Внутренние вызовы требуют сервисной аутентификации.
+the requirements already describe domains with different needs. the feed mainly serves reads and can tolerate slightly older data. orders and payments need reliable state changes and a clear history. notifications rely on external providers that may be slow or unavailable.
 
-Корреляционный ID проходит через запросы и события. Для целевой системы нужны
-метрики ошибок и задержек checkout, возраста outbox, длины очередей, времени
-переиндексации и ошибок доставки; логи не должны содержать платёжные реквизиты.
-Контакты и настройки каналов приходят в Notification из Identity. Если статус
-заказа пришёл раньше контакта, уведомление откладывается и повторяется.
+separate services make these responsibilities and data boundaries clear. they also allow the busiest parts to grow independently.
 
-`/health` в демонстрации проверяет только работоспособность HTTP-процесса
-(liveness): зависимостей у каркаса нет. Python http.server выбран ради простоты
-учебного сервиса; для production API нужен production-сервер и отдельная readiness
-проверка зависимостей. Compose поднимает ровно один сервис и не требует БД.
+this choice assumes a growing platform and a team able to run several services. the assignment does not specify traffic or team size. for a small team building an early product, option a would often be a better starting point. here, option b is the target design, while the implementation stays limited to one service skeleton.
 
-## Проверка перед сдачей
+## access and operations
+
+each api checks the user's signed access token and permissions. a seller can change only their own offers, and a buyer can read only their own orders. identity keeps the private signing key; services receive the public keys through configuration. internal calls also need service authentication.
+
+requests and events carry a shared tracking id so a problem can be followed across services. the planned system should track checkout errors and delays, unsent events, queue sizes and delivery failures.
+
+notification gets contact details and channel preferences from identity events. if an order event arrives before its contact details, notification waits and retries. accepting a message at the provider does not yet mean it reached the buyer.
+
+the implemented `/health` endpoint only checks that the web process responds. there are no databases or other dependencies to check. python's built-in web server is enough for this small demonstration; a real api would need a production server and separate checks for its dependencies.
+
+## checks
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -293,64 +243,42 @@ curl --fail -i http://localhost:8080/health
 docker compose ps
 ```
 
-Ожидаются два успешных теста, HTTP 200 и статус `healthy`. Проверка также
-выполняется в `.github/workflows/verify.yml` при push и pull request.
-Если порт 8080 занят, измените только левую часть `127.0.0.1:8080:8080`
-в Compose и URL curl. Для запуска из обычного терминала дополнительные
-переменные окружения не нужны.
+expect two passing tests, status code `200` and a container marked `healthy`. the [workflow](.github/workflows/verify.yml) runs the tests, builds the image and checks the endpoint on each push and pull request.
 
-Изображение `docs/c4-container.svg` сгенерировано из `docs/c4-container.mmd`.
-Для обновления изображения необязательно устанавливать инструменты глобально:
+if port 8080 is already in use, change the host port in `127.0.0.1:8080:8080` in the compose file, then use that port in the curl command. keep the container port at 8080.
+
+## files and design notes
+
+- [readme](README.md): the architecture and run instructions;
+- [service](src/catalog_service.py): the health endpoint;
+- [tests](tests/test_health.py): checks for the health response and an unknown route;
+- [dockerfile](Dockerfile): the service image;
+- [compose file](docker-compose.yml): local container settings;
+- [makefile](Makefile): shortcuts for common commands;
+- [diagram source](docs/c4-container.mmd) and [image](docs/c4-container.svg): the c4 container view;
+- [decision 1](docs/adr/0001-service-decomposition.md): service boundaries;
+- [decision 2](docs/adr/0002-consistency-and-messaging.md): consistency and messages;
+- [decision 3](docs/adr/0003-feed-personalization.md): feed personalisation.
+
+to regenerate the diagram:
 
 ```bash
 npx --yes @mermaid-js/mermaid-cli@11.12.0 -i docs/c4-container.mmd -o docs/c4-container.svg -b white
 ```
 
-Это инструмент документации, сервис и Docker-сборка от Node.js не зависят.
+this tool is only for the diagram. running the service does not require node.js.
 
-## Зафиксированные решения
+## assignment checklist
 
-- [`ADR-0001: декомпозиция по бизнес-доменам`](docs/adr/0001-service-decomposition.md)
-- [`ADR-0002: согласованность и сообщения`](docs/adr/0002-consistency-and-messaging.md)
-- [`ADR-0003: персонализация ленты`](docs/adr/0003-feed-personalization.md)
-
-## Структура репозитория
-
-```text
-.
-├── README.md
-├── Dockerfile
-├── docker-compose.yml
-├── Makefile
-├── .github/workflows/verify.yml
-├── src/
-│   └── catalog_service.py
-├── tests/
-│   └── test_health.py
-└── docs/
-    ├── c4-container.mmd
-    ├── c4-container.svg
-    └── adr/
-        ├── 0001-service-decomposition.md
-        ├── 0002-consistency-and-messaging.md
-        └── 0003-feed-personalization.md
-```
-
-## Что намеренно не реализовано
-
-API каталога, базы данных, очередь событий, авторизация, checkout, платежи и
-уведомления описаны архитектурно, но не реализованы. Это сохраняет ограничение
-задания: единственный runtime endpoint — технический health check.
-
-## Соответствие критериям
-
-| Пункт | Где смотреть |
+| requirement | where to find it |
 |---|---|
-| 1. C4 Container | Диаграмма в README, исходник и SVG в docs |
-| 2. Docker и HTTP 200 | Dockerfile, Compose, src/catalog_service.py, инструкция запуска, CI |
-| 3. Домены | Таблица «Контейнеры и распределение доменов» |
-| 4. Разбиение по сервисам | Та же таблица, ADR-0001 |
-| 5. Данные и связи | «Владение данными», «Взаимодействия», ADR-0002 |
-| 6. Альтернативы | Варианты A, B, C |
-| 7. Trade-off’ы | Плюсы и минусы каждого варианта |
-| 8. Выбор | «Почему выбран вариант B» |
+| 1. c4 container diagram | the diagram above, plus its source and image in docs |
+| 2. docker and a working health endpoint | the service, docker files, run instructions and automated checks |
+| 3. explicit domains and responsibilities | domains, services and data |
+| 4. explanation of the service split | the service table and the reasons for choosing option b |
+| 5. data ownership and service communication | who can read and change data; how services talk to each other |
+| 6. at least two different designs | options a, b and c |
+| 7. trade-offs for each design | advantages and disadvantages under each option |
+| 8. a justified final choice | why option b was chosen |
+
+product management, databases, authentication, checkout, payments and notifications are described only as a design. none of their business logic is implemented.
