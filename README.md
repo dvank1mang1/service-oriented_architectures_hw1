@@ -2,7 +2,7 @@
 
 this project describes a marketplace where sellers list products and buyers browse a personal feed, place orders and pay for them.
 
-only one small service is implemented: `catalog-service`. it has a `/health` endpoint so we can check that it starts and runs in docker. the rest of the marketplace is a design, with no business logic implemented.
+the code contains a single service, `catalog-service`, with a `/health` endpoint. it runs in docker and has no business logic. the sections below describe the planned marketplace.
 
 ## run the project
 
@@ -21,7 +21,7 @@ the endpoint returns status code `200` and this body:
 {"status":"ok","service":"catalog-service"}
 ```
 
-there is no shop page at this address. it is a small technical check that tells us the service is running.
+`/health` checks that the service responds. other paths return status code `404`.
 
 check the container status:
 
@@ -29,7 +29,13 @@ check the container status:
 docker compose ps
 ```
 
-the status should include `healthy`. to stop the project:
+the status should include `healthy`. if startup fails, check the logs:
+
+```bash
+docker compose logs catalog-service
+```
+
+to stop the project:
 
 ```bash
 docker compose down

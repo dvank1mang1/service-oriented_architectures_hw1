@@ -1,9 +1,3 @@
-"""HTTP skeleton for the future Catalog Service.
-
-There is deliberately no marketplace business logic in this module.  It only
-exposes a liveness endpoint required to demonstrate the deployment boundary.
-"""
-
 from __future__ import annotations
 
 import json
@@ -21,7 +15,7 @@ class HealthHandler(BaseHTTPRequestHandler):
     server_version = "catalog-service"
     sys_version = ""
 
-    def do_GET(self) -> None:  # noqa: N802 - method name is defined by BaseHTTPRequestHandler
+    def do_GET(self) -> None:
         if self.path != "/health":
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
